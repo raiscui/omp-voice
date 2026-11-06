@@ -1,0 +1,8 @@
+.codegraph/
+node_modules/
+.envrc
+.envrc.*
+!.envrc.example
+*.wav
+*.log
+.DS_Store

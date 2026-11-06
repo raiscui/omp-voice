@@ -1,0 +1,19 @@
+{
+  "name": "omp-read-aloud",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "omp": {
+    "name": "按需朗读",
+    "description": "用 F8 朗读最后回复, 支持中文音色选择和试听",
+    "extensions": ["./read-aloud.ts"],
+    "settings": {
+      "voice": {
+        "type": "enum",
+        "description": "中文朗读音色, 使用 /read-aloud-voice 试听和选择",
+        "values": ["longanlingxin", "longanlufeng", "qwen-audio-3.0-tts-plus-longshanyancan", "qwen-audio-3.0-tts-plus-longyingyifan", "qwen-audio-3.0-tts-plus-longlanghongmo", "qwen-audio-3.0-tts-plus-longrongzhihe", "qwen-audio-3.0-tts-plus-longcanzhuyue", "longanhuan_v3.6"],
+        "default": "longanlingxin"
+      }
+    }
+  }
+}
