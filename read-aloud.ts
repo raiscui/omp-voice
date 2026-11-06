@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
+import { speakText } from "./speech";
 
 const endpoint = "https://token-plan.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer";
 const voices = [
@@ -34,22 +35,6 @@ function tokenPlanKey(): string {
   return key;
 }
 
-function splitText(text: string): string[] {
-  const parts: string[] = [];
-  let current = "";
-  let length = 0;
-  for (const character of text) {
-    current += character;
-    length++;
-    if (length >= 1000 || (length >= 300 && /[。！？.!?\n]/u.test(character))) {
-      parts.push(current);
-      current = "";
-      length = 0;
-    }
-  }
-  if (current.trim()) parts.push(current);
-  return parts;
-}
 
 async function synthesize(text: string, key: string, voice: string, signal: AbortSignal): Promise<Uint8Array> {
   const response = await fetch(endpoint, {
@@ -71,13 +56,14 @@ async function synthesize(text: string, key: string, voice: string, signal: Abor
   return wav;
 }
 
-async function play(wav: Uint8Array, job: SpeechJob): Promise<void> {
+async function play(wav: Uint8Array, job: SpeechJob, onStarted: () => void): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "omp-read-aloud-"));
   try {
     const path = join(directory, "speech.wav");
     await writeFile(path, wav, { mode: 0o600 });
     job.abort.signal.throwIfAborted();
     const player = spawn("/usr/bin/afplay", [path], { stdio: "ignore" });
+    player.once("spawn", onStarted);
     job.player = player;
     const { promise, resolve, reject } = Promise.withResolvers<void>();
     player.once("error", reject);
@@ -114,16 +100,22 @@ export default function (pi: ExtensionAPI): void {
   const start = (ctx: ExtensionContext, text: string, previewVoice?: string) => {
     const job: SpeechJob = { abort: new AbortController() };
     active = job;
-    ctx.ui.notify(previewVoice ? "正在试听, 按 F8 停止" : "正在朗读最后一条回复, 再按 F8 停止", "info");
+    ctx.ui.notify(previewVoice ? "正在准备试听, 按 F8 取消" : "正在准备首段语音, 后续按播放进度生成, 按 F8 取消", "info");
     job.done = (async () => {
       const voice = previewVoice ?? await currentVoice(job.abort.signal);
       const key = tokenPlanKey();
-      for (const part of splitText(text)) {
-        job.abort.signal.throwIfAborted();
-        const wav = await synthesize(part, key, voice, job.abort.signal);
-        job.abort.signal.throwIfAborted();
-        await play(wav, job);
-      }
+      let first = true;
+      await speakText(text, {
+        signal: job.abort.signal,
+        synthesize: (part, signal) => synthesize(part, key, voice, signal),
+        play: async (wav, onStarted) => {
+          if (first) {
+            first = false;
+            ctx.ui.notify(previewVoice ? "开始试听, 按 F8 停止" : "开始朗读, 快播完时才补充后续语音, 按 F8 停止", "info");
+          }
+          await play(wav, job, onStarted);
+        },
+      });
       if (!job.abort.signal.aborted) ctx.ui.notify(previewVoice ? "试听完成" : "朗读完成", "info");
     })().catch((error: unknown) => {
       if (!job.abort.signal.aborted) ctx.ui.notify(`朗读失败: ${error instanceof Error ? error.message : String(error)}`, "error");
