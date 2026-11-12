@@ -1,5 +1,5 @@
 import { afterEach, expect, jest, test } from "bun:test";
-import { speakText, splitText, wavDurationMs } from "./speech";
+import { sliceWav, speakText, splitText, wavDurationMs } from "./speech";
 
 const longText = "中".repeat(1500);
 
@@ -39,9 +39,52 @@ test("WAV 时长来自数据长度和字节速率, 支持偏移视图与附加�
   const extra = Buffer.concat([wav.subarray(0, 12), junk, wav.subarray(12)]);
   extra.writeUInt32LE(extra.length - 8, 4);
   expect(wavDurationMs(extra)).toBe(12000);
+  const seekable = audio(0, 12); seekable[44 + 8000] = 17;
+  const sliced = sliceWav(seekable, 4000);
+  expect(wavDurationMs(sliced)).toBe(8000);
+  expect(sliced[44]).toBe(17);
+  expect(new DataView(sliced.buffer, sliced.byteOffset, sliced.byteLength).getUint32(4, true)).toBe(sliced.length - 8);
+  const firstChunk = Buffer.alloc(8 + 4000);
+  firstChunk.write("data"); firstChunk.writeUInt32LE(4000, 4); seekable.copy(firstChunk, 8, 44, 4044);
+  const secondSize = seekable.length - 44 - 4000;
+  const secondChunk = Buffer.alloc(8 + secondSize);
+  secondChunk.write("data"); secondChunk.writeUInt32LE(secondSize, 4); seekable.copy(secondChunk, 8, 4044);
+  const splitData = Buffer.concat([seekable.subarray(0, 36), firstChunk, secondChunk]);
+  splitData.writeUInt32LE(splitData.length - 8, 4);
+  const slicedSplitData = sliceWav(splitData, 4000);
+  expect(wavDurationMs(slicedSplitData)).toBe(8000);
+  expect(slicedSplitData[44]).toBe(17);
+  const placeholder = Buffer.from(audio(0, 1));
+  placeholder.writeUInt32LE(0x7fffffbf, 4);
+  placeholder.writeUInt32LE(0x7fffff9b, 40);
+  expect(wavDurationMs(placeholder)).toBe(1000);
+  expect(wavDurationMs(sliceWav(placeholder, 500))).toBe(500);
   expect(() => wavDurationMs(wav.subarray(0, 50))).toThrow("不完整");
   const invalid = Buffer.from(wav); invalid.writeUInt32LE(0, 28);
   expect(() => wavDurationMs(invalid)).toThrow("时长");
+});
+
+test("同一检查点复用已合成片段, 并从保存的片段位置续播", async () => {
+  const text = "缓存后续播";
+  const storedAudio = audio(7);
+  const cache = new Map<number, Uint8Array>();
+  const played: number[] = [];
+  let syntheses = 0;
+  const run = (offsetMs: number) => speakText(text, {
+    signal: new AbortController().signal,
+    startAt: { partIndex: 0, offsetMs },
+    cache: {
+      read: index => cache.get(index),
+      write: (index, _part, wav) => { cache.set(index, wav); },
+      delete: index => { cache.delete(index); },
+    },
+    synthesize: async () => { syntheses++; return storedAudio; },
+    play: async (_wav, onStarted, request) => { onStarted(); played.push(request.offsetMs); },
+  });
+  await run(0);
+  await run(5000);
+  expect(syntheses).toBe(1);
+  expect(played).toEqual([0, 5000]);
 });
 
 test("只请求首段, 最后缓冲段剩余五秒才补两段, 生成完不连续补下一批", async () => {

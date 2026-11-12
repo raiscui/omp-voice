@@ -5,7 +5,7 @@
   "type": "module",
   "omp": {
     "name": "按需朗读",
-    "description": "用 F8 朗读最后回复, 支持中文音色选择和试听",
+    "description": "F8 暂停或继续朗读最后回复, Shift+F8 从头播放, 支持中文音色选择与试听",
     "extensions": ["./read-aloud.ts"],
     "settings": {
       "voice": {
